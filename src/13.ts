@@ -1,3 +1,3 @@
-export type Demand<T> = {
+export type Demand<in out T> = {
   demand: T;
 };
