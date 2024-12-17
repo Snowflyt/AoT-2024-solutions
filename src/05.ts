@@ -1,4 +1,4 @@
-export const createRoute = (author: string, route: unknown) => {
+export const createRoute = <Route>(author: string, route: Route): Route => {
   console.log(`[createRoute] route created by ${author} at ${Date.now()}`);
   return route;
 };
