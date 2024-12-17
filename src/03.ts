@@ -1,4 +1,4 @@
-export const survivalRatio = (input) => {
+export const survivalRatio = (input: number) => {
   const data = annualData[input];
   if (!data) {
     throw new Error("Data not found");
