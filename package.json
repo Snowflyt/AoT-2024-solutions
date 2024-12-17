@@ -1,0 +1,44 @@
+{
+  "name": "aot-2024-solutions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Solutions for TypeHero’s Advent of Typescript 2024",
+  "keywords": [
+    "typescript",
+    "type gymnastics"
+  ],
+  "homepage": "https://github.com/Snowflyt/aot-2024-solutions",
+  "bugs": {
+    "url": "https://github.com/Snowflyt/aot-2024-solutions/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Snowflyt/aot-2024-solutions"
+  },
+  "license": "MIT",
+  "author": "Snowflyt <gaoge011022@163.com>",
+  "type": "module",
+  "scripts": {
+    "format": "prettier --no-error-on-unmatched-pattern --write **/*.{js,ts,json,md} *.{cjs,mjs,cts,mts}",
+    "lint": "eslint **/*.{js,ts} *.{cjs,mjs,cts,mts} --no-error-on-unmatched-pattern --report-unused-disable-directives-severity error --max-warnings 0",
+    "lint:fix": "eslint --fix **/*.{js,ts} *.{cjs,mjs,cts,mts} --no-error-on-unmatched-pattern --report-unused-disable-directives-severity error --max-warnings 0",
+    "test": "typroof"
+  },
+  "devDependencies": {
+    "@types/eslint": "^8.56.12",
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.1",
+    "@typescript-eslint/parser": "^8.18.1",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-import-resolver-typescript": "^3.7.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "eslint-plugin-sonarjs": "^0.25.1",
+    "eslint-plugin-sort-destructure-keys": "^2.0.0",
+    "prettier": "^3.4.2",
+    "prettier-plugin-packagejson": "^2.5.6",
+    "typescript": "^5.7.2",
+    "typroof": "^0.3.5"
+  }
+}
