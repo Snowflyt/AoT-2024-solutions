@@ -1,1 +1,1 @@
-export type Demand = number;
+export type Demand = 900_000;
