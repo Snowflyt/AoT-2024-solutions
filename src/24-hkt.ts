@@ -1,11 +1,8 @@
 /**
- * This solution uses the similar idea as the solution in `./23.ts`, i.e., the logic to apply each
- * parser is implemented directly in the `Parse` type.
+ * This solution uses higher-kinded types (HKT) to implement parser combinators, instead of
+ * implementing the logic to apply each parser directly in the `Parse` type.
  *
- * However, since we already have the `Mapper` interface that can be used to represent a
- * higher-kinded type (HKT), parsers can be also represented using the `Mapper` interface. This
- * solution can be more flexible and easier to extend, since the logic to apply each parser now
- * belongs to the parser itself. You can view the solution in `./24-hkt.ts`.
+ * For a simpler version that is (possibly) easier to understand, see `./24.ts`.
  */
 
 /*************
@@ -24,82 +21,41 @@ type ApplyMapper<M, Data> =
   M & { data: Data } extends { map: (...args: any) => infer R } ? R : never;
 
 /**
- * A parser that accepts a string and returns a {@linkcode ParsingResult}.
+ * A parser can be an {@linkcode EagerParser} which is literally a {@linkcode Mapper} that accepts a
+ * string and returns a {@linkcode ParsingResult}, or a lazied one which is a function that returns
+ * a {@linkcode Parser}.
  */
-export type Parser = { tag: string } | (() => Parser);
+export type Parser = EagerParser | (() => Parser);
+interface EagerParser extends Mapper<string> {}
 type ParsingResult = { success: true; data: unknown; rest: string } | { success: false };
+type ApplyParser<P, Data> = P extends () => infer P ? ApplyParser<P, Data> : ApplyMapper<P, Data>;
 
 /**************************
  * Parser implementations *
  **************************/
-export type Parse<A, B> =
-  A extends Parser ?
-    B extends string ?
-      ApplyParser<A, B>
-    : never
-  : BuildParser<A, B>;
-type ApplyParser<P extends Parser, S extends string> =
-  // If `A` is a lazied parser, extract the parser and recursively call `Parse` with it
-  P extends (() => infer P extends Parser) ? ApplyParser<P, S>
-  : // Otherwise, apply the parser
-  P extends { tag: "EOF" } ? ParseEOF<S>
-  : P extends { tag: "Choice"; parsers: infer Parsers extends Parser[] } ? ParseChoice<S, Parsers>
-  : P extends { tag: "Just"; token: infer Token extends string } ? ParseJust<S, Token>
-  : P extends { tag: "Many0"; parser: infer P extends Parser } ? ParseMany0<S, P>
-  : P extends { tag: "Many1"; parser: infer P extends Parser } ? ParseMany1<S, P>
-  : P extends (
-    { tag: "MapResult"; parser: infer P extends Parser; mappers: infer Mappers extends Mapper[] }
-  ) ?
-    ParseMapResult<S, P, Mappers>
-  : P extends { tag: "Maybe"; parser: infer P extends Parser } ? ParseMaybe<S, P>
-  : P extends { tag: "NoneOf"; token: infer Token extends string } ? ParseNoneOf<S, Token>
-  : P extends { tag: "Pair"; left: infer L extends Parser; right: infer R extends Parser } ?
-    ParsePair<S, L, R>
-  : P extends { tag: "Seq"; parsers: infer Parsers extends Parser[] } ? ParseSeq<S, Parsers>
-  : P extends { tag: "Left"; left: infer L extends Parser; right: infer R extends Parser } ?
-    ParseLeft<S, L, R>
-  : P extends { tag: "Right"; left: infer L extends Parser; right: infer R extends Parser } ?
-    ParseRight<S, L, R>
-  : P extends (
-    { tag: "SepBy0"; parser: infer P extends Parser; separator: infer Sep extends Parser }
-  ) ?
-    ParseSepBy0<S, P, Sep>
-  : never;
+export type Parse<A, B> = A extends Parser ? ApplyParser<A, B> : BuildParser<A, B>;
 type BuildParser<Id, T> =
-  Id extends { id: "Choice" } ? { tag: "Choice"; parsers: T }
-  : Id extends { id: "Just" } ? { tag: "Just"; token: T }
-  : Id extends { id: "Many0" } ? { tag: "Many0"; parser: T }
-  : Id extends { id: "Many1" } ? { tag: "Many1"; parser: T }
-  : Id extends { id: "MapResult" } ?
-    T extends [infer P, ...infer MS] ?
-      { tag: "MapResult"; parser: P; mappers: MS }
-    : never
-  : Id extends { id: "Maybe" } ? { tag: "Maybe"; parser: T }
-  : Id extends { id: "NoneOf" } ? { tag: "NoneOf"; token: T }
-  : Id extends { id: "Pair" } ?
-    T extends [unknown, unknown] ?
-      { tag: "Pair"; left: T[0]; right: T[1] }
-    : never
-  : Id extends { id: "Seq" } ? { tag: "Seq"; parsers: T }
-  : Id extends { id: "Left" } ?
-    T extends [unknown, unknown] ?
-      { tag: "Left"; left: T[0]; right: T[1] }
-    : never
-  : Id extends { id: "Right" } ?
-    T extends [unknown, unknown] ?
-      { tag: "Right"; left: T[0]; right: T[1] }
-    : never
-  : Id extends { id: "SepBy0" } ?
-    T extends [unknown, unknown] ?
-      { tag: "SepBy0"; parser: T[0]; separator: T[1] }
-    : never
+  Id extends Choice ? ChoiceParser<T>
+  : Id extends Just ? JustParser<T>
+  : Id extends Many0 ? Many0Parser<T>
+  : Id extends Many1 ? Many1Parser<T>
+  : Id extends MapResult ? MapResultParser<T>
+  : Id extends Maybe ? MaybeParser<T>
+  : Id extends NoneOf ? NoneOfParser<T>
+  : Id extends Pair ? PairParser<T>
+  : Id extends Seq ? SeqParser<T>
+  : Id extends Left ? LeftParser<T>
+  : Id extends Right ? RightParser<T>
+  : Id extends SepBy0 ? SepBy0Parser<T>
   : never;
 
 /**
  * Matches the end of the input string and returns a success if it is reached, or a failure if there
  * are still characters left.
  */
-export type EOF = { tag: "EOF" };
+export interface EOF extends EagerParser {
+  map: (remaining: this["data"]) => ParseEOF<typeof remaining>;
+}
 type ParseEOF<Remaining extends string> =
   Remaining extends "" ? { success: true; data: null; rest: "" } : { success: false };
 
@@ -108,8 +64,11 @@ type ParseEOF<Remaining extends string> =
  * if none of them succeed.
  */
 export type Choice = { id: "Choice" };
-type ParseChoice<Remaining extends string, Parsers extends Parser[]> =
-  Parsers extends [infer Head extends Parser, ...infer Tail extends Parser[]] ?
+interface ChoiceParser<PS> extends EagerParser {
+  map: (remaining: this["data"]) => ParseChoice<typeof remaining, PS>;
+}
+type ParseChoice<Remaining extends string, PS> =
+  PS extends [infer Head, ...infer Tail] ?
     ApplyParser<Head, Remaining> extends (
       { success: true; data: infer Data; rest: infer Rest extends string }
     ) ?
@@ -121,6 +80,11 @@ type ParseChoice<Remaining extends string, Parsers extends Parser[]> =
  * Matches a single character (or token) from the input string and returns it.
  */
 export type Just = { id: "Just" };
+interface JustParser<Token> extends EagerParser {
+  map: (
+    remaining: this["data"],
+  ) => [Token] extends [string] ? ParseJust<typeof remaining, Token> : never;
+}
 type ParseJust<Remaining extends string, Token extends string> =
   Remaining extends `${infer S extends Token}${infer Rest}` ? { success: true; data: S; rest: Rest }
   : { success: false };
@@ -129,7 +93,10 @@ type ParseJust<Remaining extends string, Token extends string> =
  * Matches zero or more occurrences of a parser and returns a list of the results.
  */
 export type Many0 = { id: "Many0" };
-type ParseMany0<Remaining extends string, P extends Parser, Result extends unknown[] = []> =
+interface Many0Parser<P> extends EagerParser {
+  map: (remaining: this["data"]) => ParseMany0<typeof remaining, P>;
+}
+type ParseMany0<Remaining extends string, P, Result extends unknown[] = []> =
   ApplyParser<P, Remaining> extends (
     { success: true; data: infer Data; rest: infer Rest extends string }
   ) ?
@@ -140,7 +107,10 @@ type ParseMany0<Remaining extends string, P extends Parser, Result extends unkno
  * Matches one or more occurrences of a parser and returns a list of the results.
  */
 export type Many1 = { id: "Many1" };
-type ParseMany1<Remaining extends string, P extends Parser, Result extends unknown[] = []> =
+interface Many1Parser<P> extends EagerParser {
+  map: (remaining: this["data"]) => ParseMany1<typeof remaining, P>;
+}
+type ParseMany1<Remaining extends string, P, Result extends unknown[] = []> =
   ApplyParser<P, Remaining> extends (
     { success: true; data: infer Data; rest: infer Rest extends string }
   ) ?
@@ -152,20 +122,29 @@ type ParseMany1<Remaining extends string, P extends Parser, Result extends unkno
  * Matches a parser and then applies a list of mappers to the result.
  */
 export type MapResult = { id: "MapResult" };
-type ParseMapResult<Remaining extends string, P extends Parser, Mappers extends Mapper[]> =
+interface MapResultParser<ParserAndMappers> extends EagerParser {
+  map: (
+    remaining: this["data"],
+  ) => ParserAndMappers extends [infer P, ...infer MS] ? ParseMapResult<typeof remaining, P, MS>
+  : never;
+}
+type ParseMapResult<Remaining extends string, P, MS> =
   ApplyParser<P, Remaining> extends (
     { success: true; data: infer Data; rest: infer Rest extends string }
   ) ?
-    { success: true; data: CallMappers<Mappers, Data>; rest: Rest }
+    { success: true; data: PipeMappers<Data, MS>; rest: Rest }
   : { success: false };
-type CallMappers<MS, Data> =
-  MS extends [infer Head, ...infer Tail] ? CallMappers<Tail, ApplyMapper<Head, Data>> : Data;
+type PipeMappers<Data, MS> =
+  MS extends [infer Head, ...infer Tail] ? PipeMappers<ApplyMapper<Head, Data>, Tail> : Data;
 
 /**
  * Matches 0 or 1 occurrence of a parser and returns the result in a {@linkcode MaybeResult}.
  */
 export type Maybe = { id: "Maybe" };
-type ParseMaybe<Remaining extends string, P extends Parser> =
+interface MaybeParser<P> extends EagerParser {
+  map: (remaining: this["data"]) => ParseMaybe<typeof remaining, P>;
+}
+type ParseMaybe<Remaining extends string, P> =
   ApplyParser<P, Remaining> extends (
     { success: true; data: infer Data; rest: infer Rest extends string }
   ) ?
@@ -176,6 +155,11 @@ type ParseMaybe<Remaining extends string, P extends Parser> =
  * Matches a single character that does not extend the given token and returns it.
  */
 export type NoneOf = { id: "NoneOf" };
+interface NoneOfParser<Token> extends EagerParser {
+  map: (
+    remaining: this["data"],
+  ) => [Token] extends [string] ? ParseNoneOf<typeof remaining, Token> : never;
+}
 type ParseNoneOf<Remaining extends string, Token extends string> =
   Remaining extends `${infer Char}${infer Rest}` ?
     Char extends Token ?
@@ -189,7 +173,12 @@ type ParseNoneOf<Remaining extends string, Token extends string> =
  * It is actually a special case of {@linkcode Seq} but is separated for better readability.
  */
 export type Pair = { id: "Pair" };
-type ParsePair<Remaining extends string, L extends Parser, R extends Parser> =
+interface PairParser<LR> extends EagerParser {
+  map: (
+    remaining: this["data"],
+  ) => LR extends [infer L, infer R] ? ParsePair<typeof remaining, L, R> : never;
+}
+type ParsePair<Remaining extends string, L, R> =
   ApplyParser<L, Remaining> extends (
     { success: true; data: infer Left; rest: infer Rest extends string }
   ) ?
@@ -204,8 +193,11 @@ type ParsePair<Remaining extends string, L extends Parser, R extends Parser> =
  * Matches a list of parsers and returns a list of the results.
  */
 export type Seq = { id: "Seq" };
-type ParseSeq<Remaining extends string, PS extends Parser[], Result extends unknown[] = []> =
-  PS extends [infer Head extends Parser, ...infer Tail extends Parser[]] ?
+interface SeqParser<PS> extends EagerParser {
+  map: (remaining: this["data"]) => ParseSeq<typeof remaining, PS>;
+}
+type ParseSeq<Remaining extends string, PS, Result extends unknown[] = []> =
+  PS extends [infer Head, ...infer Tail] ?
     ApplyParser<Head, Remaining> extends (
       { success: true; data: infer Data; rest: infer Rest extends string }
     ) ?
@@ -217,7 +209,12 @@ type ParseSeq<Remaining extends string, PS extends Parser[], Result extends unkn
  * Matches 2 parsers and returns the result of the first one.
  */
 export type Left = { id: "Left" };
-type ParseLeft<Remaining extends string, L extends Parser, R extends Parser> =
+interface LeftParser<LR> extends EagerParser {
+  map: (
+    remaining: this["data"],
+  ) => LR extends [infer L, infer R] ? ParseLeft<typeof remaining, L, R> : never;
+}
+type ParseLeft<Remaining extends string, L, R> =
   ApplyParser<L, Remaining> extends (
     { success: true; data: infer Left; rest: infer Rest extends string }
   ) ?
@@ -230,7 +227,12 @@ type ParseLeft<Remaining extends string, L extends Parser, R extends Parser> =
  * Matches 2 parsers and returns the result of the second one.
  */
 export type Right = { id: "Right" };
-type ParseRight<Remaining extends string, L extends Parser, R extends Parser> =
+interface RightParser<LR> extends EagerParser {
+  map: (
+    remaining: this["data"],
+  ) => LR extends [infer L, infer R] ? ParseRight<typeof remaining, L, R> : never;
+}
+type ParseRight<Remaining extends string, L, R> =
   ApplyParser<L, Remaining> extends { success: true; rest: infer Rest extends string } ?
     ApplyParser<R, Rest> extends (
       { success: true; data: infer Right; rest: infer Rest2 extends string }
@@ -244,7 +246,12 @@ type ParseRight<Remaining extends string, L extends Parser, R extends Parser> =
  * results.
  */
 export type SepBy0 = { id: "SepBy0" };
-type ParseSepBy0<Remaining extends string, P extends Parser, Sep extends Parser> =
+interface SepBy0Parser<PAndSep> extends EagerParser {
+  map: (
+    remaining: this["data"],
+  ) => PAndSep extends [infer P, infer Sep] ? ParseSepBy0<typeof remaining, P, Sep> : never;
+}
+type ParseSepBy0<Remaining extends string, P, Sep> =
   // If the first parser succeeds, try to parse [Sep, P] repeatedly
   ApplyParser<P, Remaining> extends (
     { success: true; data: infer Data; rest: infer Rest extends string }
@@ -255,12 +262,7 @@ type ParseSepBy0<Remaining extends string, P extends Parser, Sep extends Parser>
   : // If the first parser fails, return an empty list.
     { success: true; data: []; rest: Remaining };
 // Parse [Sep, P] repeatedly
-type ParseSepBy0Rest<
-  Remaining extends string,
-  P extends Parser,
-  Sep extends Parser,
-  Result extends unknown[],
-> =
+type ParseSepBy0Rest<Remaining extends string, P, Sep, Result extends unknown[]> =
   ApplyParser<Sep, Remaining> extends { success: true; rest: infer Rest extends string } ?
     ApplyParser<P, Rest> extends (
       { success: true; data: infer Data; rest: infer Rest2 extends string }
